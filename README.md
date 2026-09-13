@@ -60,6 +60,17 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) to start revising.
 
+### Supabase Authentication & URL Configuration
+
+To ensure confirmation emails and password reset links route to your live deployment rather than `localhost`:
+
+1. Open your [Supabase Dashboard](https://supabase.com/dashboard) -> **Authentication** -> **URL Configuration**.
+2. **Site URL**: Set to your production domain (e.g. `https://your-app.vercel.app` or `https://studysnap.onrender.com`).
+3. **Redirect URLs**: Add both your production and local paths:
+   - `https://your-app.vercel.app/**`
+   - `http://localhost:3000/**`
+4. *(Recommended for deliverability)*: Under **Authentication** -> **SMTP Settings**, configure custom SMTP (e.g. Resend, SendGrid) to bypass Supabase's default rate limits.
+
 ---
 
 ## Deployment
@@ -71,6 +82,7 @@ Open [http://localhost:3000](http://localhost:3000) to start revising.
 3. Configure the Environment Variables:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_SITE_URL` (e.g. `https://your-app.vercel.app`)
    - `GOOGLE_GENERATIVE_AI_API_KEY`
 4. Click **Deploy**.
 
@@ -82,4 +94,9 @@ Open [http://localhost:3000](http://localhost:3000) to start revising.
    - **Environment**: Node
    - **Build Command**: `npm install && npm run build`
    - **Start Command**: `npm run start`
-4. Add the same Environment Variables under the **Environment** tab.
+4. Add the same Environment Variables under the **Environment** tab:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_SITE_URL` (e.g. `https://studysnap.onrender.com`)
+   - `GOOGLE_GENERATIVE_AI_API_KEY`
+

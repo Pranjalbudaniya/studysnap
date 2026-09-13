@@ -4,9 +4,10 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient, isSupabaseConfigured } from "../lib/supabase/client";
+import { getSiteUrl } from "../lib/supabase/url";
 
 interface AuthFormProps {
-  mode: "sign-in" | "sign-up" | "forgot-password";
+  mode: "sign-in" | "sign-up" | "forgot-password" | "reset-password";
 }
 
 export function AuthForm(props: AuthFormProps) {
@@ -24,13 +25,16 @@ function AuthFormContent({ mode }: AuthFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [termsAgreed, setTermsAgreed] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [hasValidSession, setHasValidSession] = useState<boolean | null>(null);
   const [configured, setConfigured] = useState<boolean>(() => isSupabaseConfigured());
 
   useEffect(() => {
@@ -40,12 +44,19 @@ function AuthFormContent({ mode }: AuthFormProps) {
     const errorDescription = searchParams.get("error_description");
     if (errorParam) {
       if (errorParam === "auth_callback_failed") {
-        setErrorMessage("Authentication failed or was canceled. Please try again.");
+        setErrorMessage("Authentication link expired or invalid. Please try again.");
       } else {
         setErrorMessage(errorDescription || "Authentication error occurred.");
       }
     }
-  }, [searchParams]);
+
+    if (mode === "reset-password" && isSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setHasValidSession(Boolean(session));
+      });
+    }
+  }, [searchParams, mode]);
 
   const handleGoogleSignIn = async () => {
     setErrorMessage(null);
@@ -57,7 +68,8 @@ function AuthFormContent({ mode }: AuthFormProps) {
     setIsGoogleLoading(true);
     try {
       const supabase = createClient();
-      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const siteUrl = getSiteUrl();
+      const redirectUrl = `${siteUrl}/auth/callback`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -87,6 +99,7 @@ function AuthFormContent({ mode }: AuthFormProps) {
 
     setIsLoading(true);
     const supabase = createClient();
+    const siteUrl = getSiteUrl();
 
     try {
       if (mode === "sign-in") {
@@ -119,7 +132,7 @@ function AuthFormContent({ mode }: AuthFormProps) {
           email: email.trim(),
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: `${siteUrl}/auth/callback`,
             data: {
               full_name: name.trim() || undefined,
             },
@@ -136,24 +149,55 @@ function AuthFormContent({ mode }: AuthFormProps) {
           setIsLoading(false);
         } else if (data?.user && !data.session) {
           // Confirmation email required
-          setSuccessMessage("Check your inbox to confirm your email.");
+          setSuccessMessage("Check your inbox (and spam folder) to confirm your email.");
           setIsLoading(false);
         } else {
           window.location.href = "/study";
         }
       } else if (mode === "forgot-password") {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: `${window.location.origin}/auth/callback?next=/study`,
+          redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
         });
 
         if (error) {
-          setErrorMessage("Unable to send reset email. Please try again later.");
+          const msg = error.message.toLowerCase();
+          if (msg.includes("rate limit") || msg.includes("too many requests")) {
+            setErrorMessage("Too many reset requests. Please wait a few minutes before trying again.");
+          } else {
+            setErrorMessage("Unable to send reset email. Please try again later.");
+          }
         } else {
           setSuccessMessage(
-            "If an account exists for that email, we’ve sent a reset link."
+            "If an account exists for that email, we’ve sent a reset link. Please check your inbox and spam folder."
           );
         }
         setIsLoading(false);
+      } else if (mode === "reset-password") {
+        if (password.length < 8) {
+          setErrorMessage("Password must be at least 8 characters.");
+          setIsLoading(false);
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          setErrorMessage("Passwords do not match. Please re-enter your password.");
+          setIsLoading(false);
+          return;
+        }
+
+        const { error } = await supabase.auth.updateUser({
+          password: password,
+        });
+
+        if (error) {
+          setErrorMessage(error.message || "Unable to update password. The link may have expired.");
+          setIsLoading(false);
+        } else {
+          setSuccessMessage("Your password has been successfully updated! Redirecting to study workspace...");
+          setTimeout(() => {
+            window.location.href = "/study";
+          }, 1500);
+        }
       }
     } catch {
       setErrorMessage("Network error occurred. Please check your connection.");
@@ -182,6 +226,32 @@ function AuthFormContent({ mode }: AuthFormProps) {
           </svg>
           <div className="alert-text">
             <strong>Configuration Notice:</strong> Authentication is not configured yet. Add the Supabase public environment variables to continue.
+          </div>
+        </div>
+      )}
+
+      {/* Mode reset-password without active session warning */}
+      {mode === "reset-password" && hasValidSession === false && (
+        <div className="auth-alert warning" role="alert">
+          <svg
+            className="alert-icon"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="10" cy="10" r="8" />
+            <line x1="10" y1="7" x2="10" y2="11" />
+            <circle cx="10" cy="14" r="0.75" fill="currentColor" />
+          </svg>
+          <div className="alert-text">
+            No active password reset session found. Please click the link in your email or{" "}
+            <Link href="/forgot-password" className="form-link-inline">
+              request a new reset link
+            </Link>.
           </div>
         </div>
       )}
@@ -254,6 +324,14 @@ function AuthFormContent({ mode }: AuthFormProps) {
               </p>
             </>
           )}
+          {mode === "reset-password" && (
+            <>
+              <h1 className="auth-heading">Set a new password.</h1>
+              <p className="auth-subtext">
+                Choose a strong new password for your StudySnap account.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Google OAuth (only for sign-in) */}
@@ -311,28 +389,30 @@ function AuthFormContent({ mode }: AuthFormProps) {
             </div>
           )}
 
-          <div className="form-group">
-            <label htmlFor="email-input" className="form-label">
-              Email address
-            </label>
-            <input
-              id="email-input"
-              type="email"
-              required
-              className="form-input"
-              placeholder="name@university.edu"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading}
-              autoComplete="email"
-            />
-          </div>
+          {mode !== "reset-password" && (
+            <div className="form-group">
+              <label htmlFor="email-input" className="form-label">
+                Email address
+              </label>
+              <input
+                id="email-input"
+                type="email"
+                required
+                className="form-input"
+                placeholder="name@university.edu"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+                autoComplete="email"
+              />
+            </div>
+          )}
 
           {mode !== "forgot-password" && (
             <div className="form-group">
               <div className="form-label-row">
                 <label htmlFor="password-input" className="form-label">
-                  Password
+                  {mode === "reset-password" ? "New Password" : "Password"}
                 </label>
                 {mode === "sign-in" && (
                   <Link
@@ -389,11 +469,64 @@ function AuthFormContent({ mode }: AuthFormProps) {
                 </button>
               </div>
 
-              {mode === "sign-up" && (
+              {(mode === "sign-up" || mode === "reset-password") && (
                 <span className="form-helper-text">
                   Use at least 8 characters.
                 </span>
               )}
+            </div>
+          )}
+
+          {mode === "reset-password" && (
+            <div className="form-group">
+              <label htmlFor="confirm-password-input" className="form-label">
+                Confirm New Password
+              </label>
+
+              <div className="password-input-wrapper">
+                <input
+                  id="confirm-password-input"
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                  className="form-input password-input"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={isLoading}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showConfirmPassword ? (
+                    <svg
+                      className="toggle-icon"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                    >
+                      <path d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" />
+                      <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.742L2.303 6.546A10.048 10.048 0 00.458 10c1.274 4.057 5.064 7 9.542 7 .847 0 1.669-.11 2.454-.303z" />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="toggle-icon"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                    >
+                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                      <path d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
@@ -424,8 +557,10 @@ function AuthFormContent({ mode }: AuthFormProps) {
               <span>Sign in</span>
             ) : mode === "sign-up" ? (
               <span>Create account</span>
-            ) : (
+            ) : mode === "forgot-password" ? (
               <span>Send reset link</span>
+            ) : (
+              <span>Update password</span>
             )}
           </button>
         </form>
@@ -457,7 +592,7 @@ function AuthFormContent({ mode }: AuthFormProps) {
             </div>
           )}
 
-          {mode === "forgot-password" && (
+          {(mode === "forgot-password" || mode === "reset-password") && (
             <div className="auth-switch-text">
               Remember your password?{" "}
               <Link href="/sign-in" className="form-link-action">
