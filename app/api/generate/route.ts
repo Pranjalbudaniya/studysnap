@@ -192,51 +192,57 @@ STRICT GROUNDING & FIDELITY RULES:
     // 5. Return Validated Study Pack
     return NextResponse.json({ studyPack }, { headers });
   } catch (error: unknown) {
+    console.error("[StudySnap Generate Error]:", error);
+
     const err = error as {
       status?: number;
       statusCode?: number;
       message?: string;
       code?: string;
       name?: string;
+      cause?: unknown;
     };
 
     const status = err.status || err.statusCode || 500;
-
-
     const msg = (err.message || "").toLowerCase();
 
-    // Map errors to friendly user-facing messages
+    // 1. Authentication / API Key errors
     if (
       status === 401 ||
       status === 403 ||
-      msg.includes("api_key_invalid") ||
+      msg.includes("api_key") ||
+      msg.includes("api key") ||
       msg.includes("unauthenticated") ||
-      msg.includes("unauthorized")
+      msg.includes("unauthorized") ||
+      msg.includes("permission denied")
     ) {
       return NextResponse.json(
         {
           error:
-            "The AI service could not authenticate. Please contact the app owner.",
+            "Google Gemini API authentication failed. Please ensure your GOOGLE_GENERATIVE_AI_API_KEY is valid and not revoked.",
         },
         { status: 401, headers }
       );
     }
 
+    // 2. Rate limits / Quota exceeded
     if (
       status === 429 ||
       msg.includes("resource_exhausted") ||
       msg.includes("quota") ||
-      msg.includes("rate limit")
+      msg.includes("rate limit") ||
+      msg.includes("too many requests")
     ) {
       return NextResponse.json(
         {
           error:
-            "The AI service is busy right now. Please wait a moment and try again.",
+            "Google Gemini API rate limit or free tier quota reached. Please wait 30–60 seconds and try again.",
         },
         { status: 429, headers }
       );
     }
 
+    // 3. Network / Connection issues
     if (
       msg.includes("fetch failed") ||
       msg.includes("econnreset") ||
@@ -247,22 +253,24 @@ STRICT GROUNDING & FIDELITY RULES:
       return NextResponse.json(
         {
           error:
-            "We couldn’t reach the AI service. Check your connection and try again.",
+            "Could not connect to Google Gemini. Please check your internet connection and try again.",
         },
         { status: 503, headers }
       );
     }
 
+    // 4. Schema / Format validation
     if (
       err.name === "ZodError" ||
       msg.includes("schema") ||
       msg.includes("parse") ||
-      msg.includes("validation")
+      msg.includes("validation") ||
+      msg.includes("type_error")
     ) {
       return NextResponse.json(
         {
           error:
-            "We couldn’t safely structure this study pack. Please try again.",
+            "The AI generated response did not match the study pack structure. Please tap 'Try again'.",
         },
         { status: 422, headers }
       );
@@ -271,7 +279,9 @@ STRICT GROUNDING & FIDELITY RULES:
     return NextResponse.json(
       {
         error:
-          "We couldn’t safely structure this study pack. Please try again.",
+          err.message && err.message.length < 120
+            ? err.message
+            : "We couldn’t structure this study pack. Please try again.",
       },
       { status: 500, headers }
     );
