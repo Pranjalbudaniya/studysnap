@@ -13,6 +13,17 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+  // If any link arrives with ?code= (e.g. Supabase default Site URL fallback to /?code=...),
+  // automatically route it through /auth/callback to exchange the session
+  const code = request.nextUrl.searchParams.get("code");
+  if (code && request.nextUrl.pathname !== "/auth/callback") {
+    const callbackUrl = new URL("/auth/callback", request.url);
+    request.nextUrl.searchParams.forEach((val, key) => {
+      callbackUrl.searchParams.set(key, val);
+    });
+    return NextResponse.redirect(callbackUrl);
+  }
+
   if (!supabaseUrl || !supabaseAnonKey) {
     // If Supabase is not configured, continue without error
     return supabaseResponse;
